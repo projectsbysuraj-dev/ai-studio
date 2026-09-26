@@ -31,6 +31,8 @@ import {
 import {
   getAllWithdrawals,
   syncWithdrawalsFromFirebase,
+  syncUsersFromFirebase,
+  wipeAllFirebaseData,
   approveWithdrawal,
   rejectWithdrawal,
   deleteWithdrawalPermanently,
@@ -81,6 +83,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [adminCreds, setAdminCreds] = useState(getAdminCredentials());
   const [deleteConfirmUser, setDeleteConfirmUser] = useState<UserProfile | null>(null);
   const [deleteConfirmWithdrawal, setDeleteConfirmWithdrawal] = useState<string | null>(null);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
 
   // Settings form state
   const [botUsername, setBotUsername] = useState(settings.botUsername);
@@ -114,11 +117,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     syncWithdrawalsFromFirebase().then((data) => {
       setWithdrawals(data);
     });
+    syncUsersFromFirebase().then((uList) => {
+      setUsers(uList);
+    });
 
     // 2. Active background sync every 3.5s so newly submitted withdrawals show up immediately
     const interval = setInterval(() => {
       syncWithdrawalsFromFirebase().then((data) => {
         setWithdrawals(data);
+      });
+      syncUsersFromFirebase().then((uList) => {
+        setUsers(uList);
       });
     }, 3500);
 
@@ -166,10 +175,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleRefresh = async () => {
     triggerHaptic('light');
     setIsRefreshing(true);
-    const fresh = await syncWithdrawalsFromFirebase();
-    setWithdrawals(fresh);
-    setUsers(getAllUsers());
+    const freshW = await syncWithdrawalsFromFirebase();
+    const freshU = await syncUsersFromFirebase();
+    setWithdrawals(freshW);
+    setUsers(freshU);
     setTimeout(() => setIsRefreshing(false), 500);
+  };
+
+  const handleWipeDatabase = async () => {
+    triggerHaptic('medium');
+    await wipeAllFirebaseData();
+    setWithdrawals([]);
+    setUsers([]);
+    setShowWipeConfirm(false);
+    setUserActionToast('🧹 All users, withdrawals, and referrals wiped out! Database user count is now 0.');
+    setTimeout(() => setUserActionToast(null), 4000);
   };
 
   const handleApproveWithdrawal = (id: string) => {
@@ -680,13 +700,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </p>
               </div>
 
-              <input
-                type="text"
-                placeholder="Search user by name or ID..."
-                value={searchUserQuery}
-                onChange={(e) => setSearchUserQuery(e.target.value)}
-                className="bg-slate-900 border border-slate-800 text-sm px-4 py-2 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Search user by name or ID..."
+                  value={searchUserQuery}
+                  onChange={(e) => setSearchUserQuery(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 text-sm px-4 py-2 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowWipeConfirm(true)}
+                  className="bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/60 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap active:scale-95"
+                  title="Wipe database: delete all users, referrals, and withdrawals"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Wipe All (0 Users)</span>
+                </button>
+              </div>
             </div>
 
             {userActionToast && (
@@ -695,7 +726,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filteredUsers.length === 0 ? (
+              <div className="text-center py-12 bg-slate-900/60 rounded-3xl border border-slate-800 p-8 space-y-2">
+                <Users className="w-10 h-10 text-slate-600 mx-auto" />
+                <h3 className="font-['Outfit'] font-black text-lg text-slate-300">0 Users In Database</h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Database is completely clean (0 users). When someone opens the app or starts the bot, their profile will appear here automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {filteredUsers.map((u) => (
                 <div
                   key={u.id}
@@ -777,6 +817,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               ))}
             </div>
+          )}
           </div>
         )}
 
@@ -1170,6 +1211,41 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-lg shadow-rose-600/30 active:scale-95 transition-all"
                 >
                   Yes, Delete Record
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Wipe / Reset Database Confirmation Modal */}
+        {showWipeConfirm && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border-2 border-rose-600 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-scale-up">
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-400 mx-auto">
+                <Trash2 className="w-7 h-7" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-['Outfit'] font-black text-xl text-white">Reset Database to 0 Users?</h3>
+                <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                  This will <strong className="text-rose-400">permanently delete ALL users, all withdrawals, all referral links, and transactions</strong> from Firebase and local storage.
+                  <br /><br />
+                  User count will be reset to <strong className="text-emerald-400">0</strong>.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowWipeConfirm(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 rounded-xl border border-slate-700 active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWipeDatabase}
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-lg shadow-rose-600/40 active:scale-95 transition-all"
+                >
+                  Yes, Wipe Database 🧹
                 </button>
               </div>
             </div>

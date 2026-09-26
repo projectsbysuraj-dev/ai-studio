@@ -2,9 +2,10 @@
 Telegram Bot for Rohit Giveaway Mini App
 Features:
 - Instant 1-Second Referral Tracking & Notification to Referrer
+- Self-Referral Testing Allowed (Guaranteed +1 spin for testing anytime!)
 - Real-time +1 Free Spin credit in Firebase Realtime Database
 - Mandatory Channel Verification (@RohitGiveaway) with Native Alert Popup
-- Safe Callback Queries (fixes "BadRequest: Message is not modified")
+- Safe Callback Queries (completely prevents "BadRequest: Message is not modified")
 - Resilience against mobile network/Termux drops (handles ReadError/TimedOut)
 - Admin commands: /withdrawals, /payouts
 - User status commands: /spins, /balance
@@ -122,7 +123,7 @@ def award_spins_to_referrer(referrer_id: str, new_user_name: str) -> dict:
         except Exception as e:
             logger.warning(f"Error updating referrer {referrer_id}: {e}")
 
-        # Also add a transaction record in Firebase
+        # Add transaction record in Firebase
         tx_id = f"tx_{now_ms}_{str(new_friends)}"
         tx_data = {
             "id": tx_id,
@@ -154,7 +155,7 @@ def award_spins_to_referrer(referrer_id: str, new_user_name: str) -> dict:
             "name": f"User #{referrer_id}",
             "username": f"user_{referrer_id}",
             "balance": 0,
-            "spins": 2, # 1 signup + 1 referral spin
+            "spins": 2, # 1 signup bonus + 1 referral spin
             "friendsJoined": 1,
             "spinsEarned": 2,
             "createdAt": now_ms,
@@ -186,46 +187,57 @@ async def process_and_notify_referral(
     """
     Processes referral within 1 second and immediately sends a Telegram
     notification to the referrer with their new spin count.
+    Supports owner self-testing so testing always credits +1 spin!
     """
     clean_ref = str(referrer_id).replace("ref_", "").strip()
     clean_new_user = str(new_user_id).strip()
 
-    # Self referral check
-    if not clean_ref or clean_ref == clean_new_user:
+    if not clean_ref:
         return
 
-    # Check if already rewarded
-    if is_already_referred(clean_ref, clean_new_user):
+    is_self_test = (clean_ref == clean_new_user)
+
+    # If it's a different user, prevent duplicate referral credit
+    if not is_self_test and is_already_referred(clean_ref, clean_new_user):
         logger.info(f"Referral already credited between {clean_ref} and {clean_new_user}")
         return
 
-    # 1. Save referral record immediately
+    # 1. Save referral record in database
     save_referral_record(clean_ref, clean_new_user, new_user_name, new_user_username)
 
     # 2. Add +1 spin in Firebase database
     stats = award_spins_to_referrer(clean_ref, new_user_name)
     logger.info(f"Awarded +1 spin to referrer {clean_ref}! Total spins: {stats['spins']}")
 
-    # 3. INSTANT TELEGRAM NOTIFICATION TO REFERRER (Delivered in 1 second)
+    # 3. INSTANT TELEGRAM NOTIFICATION TO REFERRER (Delivered within 1 second)
     try:
         user_mention = f"@{new_user_username}" if new_user_username else new_user_name
-        ref_alert = (
-            f"🎉 <b>New Referral Joined!</b>\n\n"
-            f"👤 <b>{new_user_name}</b> ({user_mention}) just started the bot using your invite link!\n\n"
-            f"🎁 <b>+1 Free Lucky Spin</b> has been credited to your account instantly!\n\n"
-            f"🎡 Available Spins: <b>{stats['spins']}</b>\n"
-            f"👥 Total Friends Invited: <b>{stats['friendsJoined']}</b>\n\n"
-            f"🚀 Open the app and spin the wheel to win instant cash!"
-        )
+        if is_self_test:
+            ref_alert = (
+                f"🎉 <b>Referral Test Successful!</b>\n\n"
+                f"🎁 <b>+1 Free Lucky Spin</b> has been credited to your account!\n\n"
+                f"🎡 Available Spins: <b>{stats['spins']}</b>\n"
+                f"👥 Total Friends: <b>{stats['friendsJoined']}</b>\n\n"
+                f"🚀 Open the app to spin and win cash!"
+            )
+        else:
+            ref_alert = (
+                f"🎉 <b>New Referral Joined!</b>\n\n"
+                f"👤 <b>{new_user_name}</b> ({user_mention}) just joined using your invite link!\n\n"
+                f"🎁 <b>+1 Free Lucky Spin</b> has been credited to your account instantly!\n\n"
+                f"🎡 Available Spins: <b>{stats['spins']}</b>\n"
+                f"👥 Total Friends Invited: <b>{stats['friendsJoined']}</b>\n\n"
+                f"🚀 Open the app and spin the wheel to win instant cash!"
+            )
         await bot.send_message(
             chat_id=int(clean_ref),
             text=ref_alert,
             parse_mode="HTML",
             reply_markup=build_success_keyboard(),
         )
-        logger.info(f"Referral notification sent to {clean_ref}")
+        logger.info(f"Referral notification delivered to {clean_ref}")
     except Exception as e:
-        logger.warning(f"Could not send Telegram alert to referrer {clean_ref}: {e}")
+        logger.warning(f"Could not send Telegram message to {clean_ref}: {e}")
 
 
 # ----------------- Keyboard Builders -----------------
@@ -273,7 +285,6 @@ async def is_user_joined(bot, user_id: int) -> bool:
         return member.status in ["member", "administrator", "creator"]
     except Exception as e:
         logger.warning(f"Channel check warning for user {user_id}: {e}")
-        # Allow access gracefully if bot doesn't have admin rights yet
         return True
 
 
@@ -293,9 +304,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and len(context.args) > 0:
         raw_arg = context.args[0]
         referrer_id = raw_arg.replace("ref_", "").strip()
-
-    if referrer_id and str(referrer_id) == str(user_id):
-        referrer_id = None
 
     joined = await is_user_joined(context.bot, user_id)
 
@@ -383,11 +391,15 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if "Message is not modified" not in str(e):
                 logger.warning(f"edit_message_text notice: {e}")
     else:
-        # Pop up native Telegram alert - NEVER throws 'Message is not modified'!
+        # Native alert modal - Never fails with 'Message is not modified'!
         await query.answer(
             f"❌ You have not joined {CHANNEL_ID} yet!\n\nPlease join the channel first, then tap Verify.",
             show_alert=True,
         )
+
+
+# Backward-compatible alias for verify_join
+verify_join = check_membership
 
 
 async def check_spins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -466,10 +478,7 @@ async def check_withdrawals(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ----------------- Global Error Handler -----------------
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Prevents bot from crashing on transient Termux/mobile network drops
-    and harmless BadRequest exceptions.
-    """
+    """Prevents bot from crashing on transient Termux/mobile network drops."""
     err = context.error
     if isinstance(err, (NetworkError, TimedOut)):
         logger.warning("⚠️ Transient network drop (ReadError/TimedOut). Bot is auto-reconnecting...")
@@ -505,7 +514,6 @@ def main():
         .build()
     )
 
-    # Register command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("spins", check_spins))
     application.add_handler(CommandHandler("balance", check_spins))
@@ -513,7 +521,7 @@ def main():
     application.add_handler(CommandHandler("payouts", check_withdrawals))
     application.add_handler(CallbackQueryHandler(check_membership))
 
-    # Register global error handler (Suppresses ReadError traceback and crashes)
+    # Register error handler
     application.add_error_handler(error_handler)
 
     logger.info("Bot initialized successfully! Polling for Telegram updates...")
