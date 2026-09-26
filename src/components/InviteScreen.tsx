@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Send, Check, Copy, Users, RefreshCw } from 'lucide-react';
 import { AppSettings, UserProfile, Transaction } from '../types';
-import { getReferralTransactions, subscribeRealtime } from '../services/store';
+import { getReferralTransactions, subscribeRealtime, syncCurrentUserFromFirebase } from '../services/store';
 import { triggerHaptic, openExternalOrTelegramLink } from '../services/telegram';
 
 interface InviteScreenProps {
@@ -47,8 +47,10 @@ export const InviteScreen: React.FC<InviteScreenProps> = ({ user, settings }) =>
   const handleRefreshData = () => {
     triggerHaptic('light');
     setIsRefreshing(true);
-    setReferralHistory(getReferralTransactions(user.id));
-    setTimeout(() => setIsRefreshing(false), 600);
+    syncCurrentUserFromFirebase(user.id).then(() => {
+      setReferralHistory(getReferralTransactions(user.id));
+      setIsRefreshing(false);
+    });
   };
 
   return (

@@ -748,6 +748,40 @@ export async function syncWithdrawalsFromFirebase(): Promise<WithdrawalRequest[]
   return getAllWithdrawals();
 }
 
+export async function syncCurrentUserFromFirebase(userId: string): Promise<UserProfile | null> {
+  if (!userId) return null;
+  try {
+    const resp = await fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/users/${userId}.json`);
+    if (resp.ok) {
+      const remote = await resp.json();
+      if (remote && remote.id) {
+        const users = getAllUsers();
+        const idx = users.findIndex(u => u.id === userId || u.telegramId === userId);
+        if (idx !== -1) {
+          users[idx] = {
+            ...users[idx],
+            ...remote,
+            spins: Math.max(users[idx].spins || 0, remote.spins || 0),
+            friendsJoined: Math.max(users[idx].friendsJoined || 0, remote.friendsJoined || 0),
+            balance: Math.max(users[idx].balance || 0, remote.balance || 0),
+          };
+          saveUsers(users);
+          notifySubscribers('user_synced_from_firebase');
+          return users[idx];
+        } else {
+          users.push(remote);
+          saveUsers(users);
+          notifySubscribers('user_synced_from_firebase');
+          return remote;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('syncCurrentUserFromFirebase notice:', e);
+  }
+  return null;
+}
+
 export function requestWithdrawal(req: Omit<WithdrawalRequest, 'id' | 'status' | 'createdAt'>): { success: boolean; error?: string; request?: WithdrawalRequest } {
   const settings = getStoredSettings();
   const user = getCurrentUser();

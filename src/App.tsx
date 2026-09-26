@@ -10,6 +10,7 @@ import {
   getStoredTheme,
   subscribeRealtime,
   processReferralJoin,
+  syncCurrentUserFromFirebase,
 } from './services/store';
 import { initTelegramApp } from './services/telegram';
 import { Header } from './components/Header';
@@ -52,10 +53,27 @@ export default function App() {
   useEffect(() => {
     initTelegramApp();
     // Synchronize user immediately after Telegram WebApp initialization
-    setUser(getCurrentUser());
+    const initialUser = getCurrentUser();
+    setUser(initialUser);
+    syncCurrentUserFromFirebase(initialUser.id).then((fresh) => {
+      if (fresh) setUser(getCurrentUser());
+    });
+
     const tgTimer = setTimeout(() => {
-      setUser(getCurrentUser());
+      const u = getCurrentUser();
+      setUser(u);
+      syncCurrentUserFromFirebase(u.id).then((fresh) => {
+        if (fresh) setUser(getCurrentUser());
+      });
     }, 250);
+
+    const handleFocus = () => {
+      const u = getCurrentUser();
+      syncCurrentUserFromFirebase(u.id).then((fresh) => {
+        if (fresh) setUser(getCurrentUser());
+      });
+    };
+    window.addEventListener('focus', handleFocus);
 
     // 1. Check for incoming referral in URL (?ref=123 or ?start=ref_123 or #tgWebAppData=...)
     if (typeof window !== 'undefined') {
@@ -103,6 +121,7 @@ export default function App() {
 
     return () => {
       clearTimeout(tgTimer);
+      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
       unsubscribe();
