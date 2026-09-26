@@ -6,6 +6,7 @@ import {
   Transaction,
   ThemePreset,
   AdminCredentials,
+  LeaderboardEntry,
 } from '../types';
 import { getTelegramUser } from './telegram';
 import {
@@ -694,6 +695,24 @@ export function saveWithdrawals(list: WithdrawalRequest[]): void {
   notifySubscribers('withdrawals_updated');
 }
 
+export async function syncWithdrawalsFromFirebase(): Promise<WithdrawalRequest[]> {
+  if (!rtdb) return getAllWithdrawals();
+  try {
+    const snapshot = await get(ref(rtdb, 'withdrawals'));
+    if (snapshot.exists()) {
+      const val = snapshot.val();
+      const arr = Object.values(val) as WithdrawalRequest[];
+      arr.sort((a, b) => b.createdAt - a.createdAt);
+      localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(arr));
+      notifySubscribers('withdrawals_updated');
+      return arr;
+    }
+  } catch (err) {
+    console.warn('syncWithdrawalsFromFirebase notice:', err);
+  }
+  return getAllWithdrawals();
+}
+
 export function requestWithdrawal(req: Omit<WithdrawalRequest, 'id' | 'status' | 'createdAt'>): { success: boolean; error?: string; request?: WithdrawalRequest } {
   const settings = getStoredSettings();
   const user = getCurrentUser();
@@ -726,11 +745,15 @@ export function requestWithdrawal(req: Omit<WithdrawalRequest, 'id' | 'status' |
   all.unshift(withdrawal);
   saveWithdrawals(all);
 
-  // Push to Firebase Realtime Database
+  // Push to Firebase Realtime Database INSTANTLY
   if (rtdb) {
     set(ref(rtdb, `withdrawals/${withdrawal.id}`), withdrawal).catch((e) => {
       console.warn('Firebase withdrawal create notice:', e);
     });
+    // Also save under user's transactions
+    if (u) {
+      set(ref(rtdb, `users/${user.id}`), u).catch(() => {});
+    }
   }
 
   // Add transaction
@@ -741,6 +764,8 @@ export function requestWithdrawal(req: Omit<WithdrawalRequest, 'id' | 'status' |
     description: req.method === 'upi' ? `Withdrawal to UPI: ${req.upiId}` : `Withdrawal to Bank: ${req.accountNumber}`,
     status: 'pending',
   });
+
+  notifySubscribers('withdrawal_created');
 
   return { success: true, request: withdrawal };
 }
@@ -844,24 +869,57 @@ export function processReferralJoin(referrerId: string, visitorId?: string): { s
   const referrer = users.find(u => u.id === cleanReferrerId || u.telegramId === cleanReferrerId);
 
   if (!referrer) {
-    // If referrer is not in local cache yet, attempt to fetch from Firebase
+    // If referrer is not in local cache yet, fetch or credit in Firebase Realtime Database
     const db = rtdb;
     if (db) {
       get(ref(db, `users/${cleanReferrerId}`)).then((snapshot) => {
+        let remoteUser: UserProfile;
         if (snapshot.exists()) {
-          const remoteUser = snapshot.val() as UserProfile;
+          remoteUser = snapshot.val() as UserProfile;
           remoteUser.friendsJoined = (remoteUser.friendsJoined || 0) + 1;
           remoteUser.spins = (remoteUser.spins || 0) + 1;
           remoteUser.spinsEarned = (remoteUser.spinsEarned || 0) + 1;
-          set(ref(db, `users/${cleanReferrerId}`), remoteUser);
-          set(ref(db, `referrals/${cleanReferrerId}/${currentUserId}`), {
-            joinerId: currentUserId,
-            timestamp: Date.now(),
-          });
+        } else {
+          remoteUser = {
+            id: cleanReferrerId,
+            telegramId: cleanReferrerId,
+            name: `User #${cleanReferrerId}`,
+            username: `user_${cleanReferrerId}`,
+            balance: 0,
+            spins: 2, // 1 signup bonus + 1 referral spin
+            friendsJoined: 1,
+            spinsEarned: 2,
+            createdAt: Date.now(),
+            isVerified: true,
+            claimedWelcomeSpin: true,
+          };
         }
-      }).catch(() => {});
+        set(ref(db, `users/${cleanReferrerId}`), remoteUser);
+        set(ref(db, `referrals/${cleanReferrerId}/${currentUserId}`), {
+          joinerId: currentUserId,
+          timestamp: Date.now(),
+        });
+
+        // Record transaction in Firebase
+        const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        set(ref(db, `transactions/${txId}`), {
+          id: txId,
+          userId: cleanReferrerId,
+          type: 'referral_bonus',
+          amount: 0,
+          description: `Friend #${currentUserId.slice(-4)} joined! +1 Lucky Spin awarded`,
+          status: 'completed',
+          createdAt: Date.now(),
+        });
+      }).catch((e) => {
+        console.warn('Firebase remote referral join notice:', e);
+      });
     }
-    return { success: false, message: 'Referrer profile not found' };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(processedKey, 'true');
+    }
+    return { success: true, message: 'Referral processed in Firebase!' };
   }
 
   // Award +1 spin and increment friendsJoined
@@ -933,5 +991,86 @@ export function simulateReferral(userId: string): { success: boolean; newSpins: 
     success: true,
     newSpins: user.spins,
     friendsCount: user.friendsJoined,
+  };
+}
+
+// -------------------------------------------------------------
+// Referral Leaderboard Service (Real Registered Users Only)
+// -------------------------------------------------------------
+export function getReferralLeaderboard(currentUserId?: string, limit: number = 10): LeaderboardEntry[] {
+  const users = getAllUsers();
+
+  // Deduplicate and filter valid real users
+  const map = new Map<string, UserProfile>();
+  users.forEach((u) => {
+    if (u && u.id) {
+      map.set(String(u.id), u);
+    }
+  });
+
+  const uniqueUsers = Array.from(map.values());
+
+  // Sort real registered users by:
+  // 1. Successful referrals (friendsJoined) descending
+  // 2. Spins earned descending
+  // 3. User registration time ascending
+  const sorted = uniqueUsers.sort((a, b) => {
+    const aRefs = a.friendsJoined || 0;
+    const bRefs = b.friendsJoined || 0;
+    if (bRefs !== aRefs) {
+      return bRefs - aRefs;
+    }
+    const aSpins = a.spinsEarned || 0;
+    const bSpins = b.spinsEarned || 0;
+    if (bSpins !== aSpins) {
+      return bSpins - aSpins;
+    }
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
+  return sorted.slice(0, limit).map((item, index) => ({
+    rank: index + 1,
+    id: item.id,
+    name: item.name || 'Telegram User',
+    username: item.username || 'user',
+    referrals: item.friendsJoined || 0,
+    spinsEarned: item.spinsEarned || 0,
+    photoUrl: item.photoUrl,
+    isCurrentUser: Boolean(currentUserId && (item.id === currentUserId || item.telegramId === currentUserId)),
+  }));
+}
+
+export function getUserLeaderboardRank(currentUserId: string): { rank: number; referrals: number; totalPlayers: number } {
+  const users = getAllUsers();
+  const map = new Map<string, UserProfile>();
+  users.forEach((u) => {
+    if (u && u.id) {
+      map.set(String(u.id), u);
+    }
+  });
+
+  const uniqueUsers = Array.from(map.values());
+
+  const sorted = uniqueUsers.sort((a, b) => {
+    const aRefs = a.friendsJoined || 0;
+    const bRefs = b.friendsJoined || 0;
+    if (bRefs !== aRefs) {
+      return bRefs - aRefs;
+    }
+    const aSpins = a.spinsEarned || 0;
+    const bSpins = b.spinsEarned || 0;
+    if (bSpins !== aSpins) {
+      return bSpins - aSpins;
+    }
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
+  const index = sorted.findIndex((item) => item.id === currentUserId || item.telegramId === currentUserId);
+  const userItem = map.get(currentUserId);
+
+  return {
+    rank: index >= 0 ? index + 1 : sorted.length + 1,
+    referrals: userItem?.friendsJoined || 0,
+    totalPlayers: sorted.length,
   };
 }

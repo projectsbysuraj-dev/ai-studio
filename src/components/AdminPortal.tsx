@@ -29,6 +29,7 @@ import {
 } from '../types';
 import {
   getAllWithdrawals,
+  syncWithdrawalsFromFirebase,
   approveWithdrawal,
   rejectWithdrawal,
   saveSettings,
@@ -101,7 +102,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   // Standalone code state
   const [copiedCode, setCopiedCode] = useState(false);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   useEffect(() => {
+    // Initial live sync from Firebase
+    syncWithdrawalsFromFirebase().then((data) => {
+      setWithdrawals(data);
+    });
+
     const unsub = subscribeRealtime(() => {
       setWithdrawals(getAllWithdrawals());
       setUsers(getAllUsers());
@@ -126,6 +134,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (result.success) {
       triggerHaptic('success');
       setIsAuthenticated(true);
+      // Immediately pull fresh withdrawals from Firebase on login
+      syncWithdrawalsFromFirebase().then((data) => setWithdrawals(data));
     } else {
       triggerHaptic('error');
       setLoginError(result.error || 'Invalid credentials');
@@ -138,10 +148,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setIsAuthenticated(false);
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     triggerHaptic('light');
-    setWithdrawals(getAllWithdrawals());
+    setIsRefreshing(true);
+    const fresh = await syncWithdrawalsFromFirebase();
+    setWithdrawals(fresh);
     setUsers(getAllUsers());
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   const handleApproveWithdrawal = (id: string) => {
@@ -380,10 +393,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={handleRefresh}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-colors border border-slate-700"
+              disabled={isRefreshing}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-colors border border-slate-700 disabled:opacity-50"
             >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Refresh Data</span>
+              <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-sky-400' : ''}`} />
+              <span className="hidden sm:inline">{isRefreshing ? 'Syncing...' : 'Live Sync'}</span>
             </button>
 
             <button

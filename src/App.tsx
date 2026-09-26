@@ -19,6 +19,7 @@ import { InviteScreen } from './components/InviteScreen';
 import { WalletScreen } from './components/WalletScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { AdminPortal } from './components/AdminPortal';
+import { WithdrawModal } from './components/WithdrawModal';
 
 function checkIsAdminRoute(): boolean {
   if (typeof window === 'undefined') return false;
@@ -39,6 +40,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile>(getCurrentUser());
   const [settings, setSettings] = useState<AppSettings>(getStoredSettings());
   const [theme, setTheme] = useState<ThemeSettings>(getStoredTheme());
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<boolean>(false);
 
   const handleNavigateToUserApp = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -55,22 +57,30 @@ export default function App() {
       setUser(getCurrentUser());
     }, 250);
 
-    // 1. Check for incoming referral in URL (?ref=123 or ?start=ref_123)
+    // 1. Check for incoming referral in URL (?ref=123 or ?start=ref_123 or #tgWebAppData=...)
     if (typeof window !== 'undefined') {
       try {
         const searchParams = new URLSearchParams(window.location.search);
-        const refParam = searchParams.get('ref') || searchParams.get('start');
-        if (refParam) {
-          const currentUser = getCurrentUser();
-          processReferralJoin(refParam, currentUser.id);
+        let refParam = searchParams.get('ref') || searchParams.get('start');
+
+        // Also check hash query (?start=ref_123 or #start=ref_123)
+        if (!refParam && window.location.hash) {
+          const hashString = window.location.hash.replace(/^#/, '');
+          const hashQuery = hashString.includes('?') ? hashString.split('?')[1] : hashString;
+          const hashParams = new URLSearchParams(hashQuery);
+          refParam = hashParams.get('ref') || hashParams.get('start');
         }
 
         // Also check window.Telegram WebApp start_param if available
         const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { initDataUnsafe?: { start_param?: string } } } }).Telegram?.WebApp;
         const tgStartParam = tgWebApp?.initDataUnsafe?.start_param;
-        if (tgStartParam) {
+        if (!refParam && tgStartParam) {
+          refParam = tgStartParam;
+        }
+
+        if (refParam) {
           const currentUser = getCurrentUser();
-          processReferralJoin(tgStartParam, currentUser.id);
+          processReferralJoin(refParam, currentUser.id);
         }
       } catch (e) {
         console.warn('Referral check notice:', e);
@@ -146,6 +156,7 @@ export default function App() {
               user={user}
               settings={settings}
               onNavigate={(tab) => setActiveTab(tab)}
+              onOpenWithdraw={() => setIsWithdrawModalOpen(true)}
             />
           )}
 
@@ -154,15 +165,31 @@ export default function App() {
               user={user}
               settings={settings}
               onNavigate={(tab) => setActiveTab(tab)}
+              onOpenWithdraw={() => setIsWithdrawModalOpen(true)}
             />
           )}
         </main>
 
-        {/* Floating Bottom Navigation */}
-        <BottomNav
-          activeTab={activeTab}
-          onTabChange={(tab) => setActiveTab(tab)}
-        />
+        {/* Floating Bottom Navigation (hidden when withdrawal modal is open so it NEVER obscures buttons) */}
+        {!isWithdrawModalOpen && (
+          <BottomNav
+            activeTab={activeTab}
+            onTabChange={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {/* Global Root Withdrawal Modal - Cleanest viewport presentation */}
+        {isWithdrawModalOpen && (
+          <WithdrawModal
+            user={user}
+            settings={settings}
+            onClose={() => setIsWithdrawModalOpen(false)}
+            onSuccess={() => {
+              setIsWithdrawModalOpen(false);
+              setUser(getCurrentUser());
+            }}
+          />
+        )}
       </div>
     </div>
   );

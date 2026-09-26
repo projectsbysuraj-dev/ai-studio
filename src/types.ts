@@ -83,3 +83,14 @@ export interface SpinSegment {
   color: string;
   textColor: string;
 }
+
+export interface LeaderboardEntry {
+  rank: number;
+  id: string;
+  name: string;
+  username: string;
+  referrals: number;
+  spinsEarned: number;
+  photoUrl?: string;
+  isCurrentUser?: boolean;
+}

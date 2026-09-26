@@ -10,16 +10,26 @@ interface WalletScreenProps {
   user: UserProfile;
   settings: AppSettings;
   onNavigate: (tab: TabType) => void;
+  onOpenWithdraw?: () => void;
 }
 
-export const WalletScreen: React.FC<WalletScreenProps> = ({ user, settings, onNavigate }) => {
+export const WalletScreen: React.FC<WalletScreenProps> = ({
+  user,
+  settings,
+  onNavigate,
+  onOpenWithdraw,
+}) => {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
   const transactions = getUserTransactions(user.id);
 
   const handleOpenWithdraw = () => {
     triggerHaptic('medium');
-    setShowWithdrawModal(true);
+    if (onOpenWithdraw) {
+      onOpenWithdraw();
+    } else {
+      setShowWithdrawModal(true);
+    }
   };
 
   const handleWithdrawSuccess = () => {
@@ -142,7 +152,7 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({ user, settings, onNa
         )}
       </div>
 
-      {showWithdrawModal && (
+      {showWithdrawModal && !onOpenWithdraw && (
         <WithdrawModal
           user={user}
           settings={settings}
