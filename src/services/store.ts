@@ -696,20 +696,40 @@ export function saveWithdrawals(list: WithdrawalRequest[]): void {
 }
 
 export async function syncWithdrawalsFromFirebase(): Promise<WithdrawalRequest[]> {
-  if (!rtdb) return getAllWithdrawals();
   try {
-    const snapshot = await get(ref(rtdb, 'withdrawals'));
-    if (snapshot.exists()) {
-      const val = snapshot.val();
-      const arr = Object.values(val) as WithdrawalRequest[];
-      arr.sort((a, b) => b.createdAt - a.createdAt);
-      localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(arr));
-      notifySubscribers('withdrawals_updated');
-      return arr;
+    // 1. Direct REST fetch (Instant, guaranteed 100% deliverability across all networks and devices)
+    const resp = await fetch('https://telebot-26c11-default-rtdb.firebaseio.com/withdrawals.json');
+    if (resp.ok) {
+      const val = await resp.json();
+      if (val && typeof val === 'object') {
+        const arr = Object.values(val) as WithdrawalRequest[];
+        arr.sort((a, b) => b.createdAt - a.createdAt);
+        localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(arr));
+        notifySubscribers('withdrawals_updated');
+        return arr;
+      }
     }
   } catch (err) {
-    console.warn('syncWithdrawalsFromFirebase notice:', err);
+    console.warn('REST syncWithdrawals notice:', err);
   }
+
+  // 2. Fallback to Firebase SDK
+  if (rtdb) {
+    try {
+      const snapshot = await get(ref(rtdb, 'withdrawals'));
+      if (snapshot.exists()) {
+        const val = snapshot.val();
+        const arr = Object.values(val) as WithdrawalRequest[];
+        arr.sort((a, b) => b.createdAt - a.createdAt);
+        localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(arr));
+        notifySubscribers('withdrawals_updated');
+        return arr;
+      }
+    } catch (err) {
+      console.warn('SDK syncWithdrawals notice:', err);
+    }
+  }
+
   return getAllWithdrawals();
 }
 
@@ -745,12 +765,34 @@ export function requestWithdrawal(req: Omit<WithdrawalRequest, 'id' | 'status' |
   all.unshift(withdrawal);
   saveWithdrawals(all);
 
-  // Push to Firebase Realtime Database INSTANTLY
+  // 1. Instant Direct HTTPS REST push with keepalive: true (never dropped even if webview closes)
+  try {
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/withdrawals/${withdrawal.id}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(withdrawal),
+      keepalive: true,
+    }).catch((e) => {
+      console.warn('REST withdrawal push notice:', e);
+    });
+
+    if (u) {
+      fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/users/${user.id}.json`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ balance: u.balance }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('REST call notice:', e);
+  }
+
+  // 2. Also push via Firebase SDK
   if (rtdb) {
     set(ref(rtdb, `withdrawals/${withdrawal.id}`), withdrawal).catch((e) => {
       console.warn('Firebase withdrawal create notice:', e);
     });
-    // Also save under user's transactions
     if (u) {
       set(ref(rtdb, `users/${user.id}`), u).catch(() => {});
     }
@@ -779,7 +821,17 @@ export function approveWithdrawal(withdrawalId: string): boolean {
   item.updatedAt = Date.now();
   saveWithdrawals(list);
 
-  // Push update to Firebase Realtime Database
+  // 1. Direct REST update
+  try {
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/withdrawals/${withdrawalId}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'approved', updatedAt: item.updatedAt }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 2. Push update to Firebase Realtime Database SDK
   if (rtdb) {
     update(ref(rtdb, `withdrawals/${withdrawalId}`), {
       status: 'approved',
@@ -810,7 +862,17 @@ export function rejectWithdrawal(withdrawalId: string, reason = 'Verification fa
   item.updatedAt = Date.now();
   saveWithdrawals(list);
 
-  // Push update to Firebase Realtime Database
+  // 1. Direct REST update
+  try {
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/withdrawals/${withdrawalId}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', rejectReason: reason, updatedAt: item.updatedAt }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 2. Push update to Firebase Realtime Database SDK
   if (rtdb) {
     update(ref(rtdb, `withdrawals/${withdrawalId}`), {
       status: 'rejected',

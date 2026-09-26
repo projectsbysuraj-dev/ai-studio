@@ -105,17 +105,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    // Initial live sync from Firebase
+    // 1. Initial live sync from Firebase
     syncWithdrawalsFromFirebase().then((data) => {
       setWithdrawals(data);
     });
+
+    // 2. Active background sync every 3.5s so newly submitted withdrawals show up immediately
+    const interval = setInterval(() => {
+      syncWithdrawalsFromFirebase().then((data) => {
+        setWithdrawals(data);
+      });
+    }, 3500);
 
     const unsub = subscribeRealtime(() => {
       setWithdrawals(getAllWithdrawals());
       setUsers(getAllUsers());
       setAdminCreds(getAdminCredentials());
     });
-    return unsub;
+    return () => {
+      clearInterval(interval);
+      unsub();
+    };
   }, []);
 
   useEffect(() => {
@@ -507,7 +517,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* ----------------- TAB 1: WITHDRAWALS ----------------- */}
         {activeTab === 'withdrawals' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h2 className="font-['Outfit'] font-black text-xl text-white">
                   Withdrawal Requests Queue
@@ -516,9 +526,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   Realtime pending UPI and Bank withdrawal requests from users
                 </p>
               </div>
-              <span className="text-xs font-bold text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
-                Total: {withdrawals.length}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setIsRefreshing(true);
+                    triggerHaptic('medium');
+                    const fresh = await syncWithdrawalsFromFirebase();
+                    setWithdrawals(fresh);
+                    setTimeout(() => setIsRefreshing(false), 400);
+                  }}
+                  disabled={isRefreshing}
+                  className="bg-slate-800 hover:bg-slate-700 active:scale-95 text-sky-400 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+                >
+                  <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshing ? 'Refreshing...' : 'Refresh Queue'}</span>
+                </button>
+                <span className="text-xs font-bold text-slate-400 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                  Total: {withdrawals.length}
+                </span>
+              </div>
             </div>
 
             {withdrawals.length === 0 ? (
