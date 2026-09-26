@@ -5,7 +5,6 @@ import {
   set,
   get,
   update,
-  remove,
   onValue,
   off,
   Database,
@@ -59,4 +58,4 @@ export async function initFirebaseAuth(): Promise<FirebaseUser | null> {
   }
 }
 
-export { ref, set, get, update, remove, onValue, off };
+export { ref, set, get, update, onValue, off };

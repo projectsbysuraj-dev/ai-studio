@@ -10,26 +10,16 @@ interface WalletScreenProps {
   user: UserProfile;
   settings: AppSettings;
   onNavigate: (tab: TabType) => void;
-  onOpenWithdraw?: () => void;
 }
 
-export const WalletScreen: React.FC<WalletScreenProps> = ({
-  user,
-  settings,
-  onNavigate,
-  onOpenWithdraw,
-}) => {
+export const WalletScreen: React.FC<WalletScreenProps> = ({ user, settings, onNavigate }) => {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [successToast, setSuccessToast] = useState(false);
   const transactions = getUserTransactions(user.id);
 
   const handleOpenWithdraw = () => {
     triggerHaptic('medium');
-    if (onOpenWithdraw) {
-      onOpenWithdraw();
-    } else {
-      setShowWithdrawModal(true);
-    }
+    setShowWithdrawModal(true);
   };
 
   const handleWithdrawSuccess = () => {
@@ -105,77 +95,54 @@ export const WalletScreen: React.FC<WalletScreenProps> = ({
           </div>
         ) : (
           <div className="space-y-2.5">
-            {transactions.map((tx) => {
-              const isWithdrawal = tx.type === 'withdrawal';
-              const isCompleted = tx.status === 'completed';
-              const isPending = tx.status === 'pending';
-
-              return (
-                <div
-                  key={tx.id}
-                  className={`rounded-2xl p-4 shadow-sm border transition-all ${
-                    isWithdrawal && isCompleted
-                      ? 'bg-emerald-50/60 border-emerald-200'
-                      : isWithdrawal && isPending
-                      ? 'bg-amber-50/40 border-amber-200'
-                      : 'bg-white border-slate-100'
-                  } flex items-center justify-between`}
-                >
-                  <div className="flex-1 pr-3">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h4 className="text-xs font-extrabold text-slate-800 leading-snug">
-                        {tx.description}
-                      </h4>
-                      {isWithdrawal && isCompleted && (
-                        <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase tracking-wider">
-                          Paid ✅
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(tx.createdAt).toLocaleDateString([], {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      <span
-                        className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                          isCompleted
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : isPending
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {isCompleted
-                          ? 'Successful'
-                          : isPending
-                          ? 'In Review'
-                          : 'Rejected'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0">
+            {transactions.map((tx) => (
+              <div
+                key={tx.id}
+                className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between"
+              >
+                <div>
+                  <h4 className="text-xs font-extrabold text-slate-800 leading-snug">
+                    {tx.description}
+                  </h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(tx.createdAt).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
                     <span
-                      className={`font-['Outfit'] font-black text-sm block ${
-                        tx.amount > 0 ? 'text-emerald-600' : 'text-slate-800'
+                      className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                        tx.status === 'completed'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : tx.status === 'pending'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-red-100 text-red-700'
                       }`}
                     >
-                      {tx.amount > 0 ? '+' : ''}₹{Math.abs(tx.amount).toFixed(2)}
+                      {tx.status}
                     </span>
                   </div>
                 </div>
-              );
-            })}
+
+                <div className="text-right">
+                  <span
+                    className={`font-['Outfit'] font-black text-sm block ${
+                      tx.amount > 0 ? 'text-emerald-600' : 'text-slate-800'
+                    }`}
+                  >
+                    {tx.amount > 0 ? '+' : ''}₹{Math.abs(tx.amount).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {showWithdrawModal && !onOpenWithdraw && (
+      {showWithdrawModal && (
         <WithdrawModal
           user={user}
           settings={settings}

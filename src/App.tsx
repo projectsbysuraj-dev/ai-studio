@@ -10,7 +10,6 @@ import {
   getStoredTheme,
   subscribeRealtime,
   processReferralJoin,
-  syncCurrentUserFromFirebase,
 } from './services/store';
 import { initTelegramApp } from './services/telegram';
 import { Header } from './components/Header';
@@ -20,7 +19,6 @@ import { InviteScreen } from './components/InviteScreen';
 import { WalletScreen } from './components/WalletScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { AdminPortal } from './components/AdminPortal';
-import { WithdrawModal } from './components/WithdrawModal';
 
 function checkIsAdminRoute(): boolean {
   if (typeof window === 'undefined') return false;
@@ -41,7 +39,6 @@ export default function App() {
   const [user, setUser] = useState<UserProfile>(getCurrentUser());
   const [settings, setSettings] = useState<AppSettings>(getStoredSettings());
   const [theme, setTheme] = useState<ThemeSettings>(getStoredTheme());
-  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<boolean>(false);
 
   const handleNavigateToUserApp = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -53,27 +50,10 @@ export default function App() {
   useEffect(() => {
     initTelegramApp();
     // Synchronize user immediately after Telegram WebApp initialization
-    const initialUser = getCurrentUser();
-    setUser(initialUser);
-    syncCurrentUserFromFirebase(initialUser.id).then((fresh) => {
-      if (fresh) setUser(getCurrentUser());
-    });
-
+    setUser(getCurrentUser());
     const tgTimer = setTimeout(() => {
-      const u = getCurrentUser();
-      setUser(u);
-      syncCurrentUserFromFirebase(u.id).then((fresh) => {
-        if (fresh) setUser(getCurrentUser());
-      });
+      setUser(getCurrentUser());
     }, 250);
-
-    const handleFocus = () => {
-      const u = getCurrentUser();
-      syncCurrentUserFromFirebase(u.id).then((fresh) => {
-        if (fresh) setUser(getCurrentUser());
-      });
-    };
-    window.addEventListener('focus', handleFocus);
 
     // 1. Check for incoming referral in URL (?ref=123 or ?start=ref_123 or #tgWebAppData=...)
     if (typeof window !== 'undefined') {
@@ -121,7 +101,6 @@ export default function App() {
 
     return () => {
       clearTimeout(tgTimer);
-      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('popstate', handleUrlChange);
       window.removeEventListener('hashchange', handleUrlChange);
       unsubscribe();
@@ -175,7 +154,6 @@ export default function App() {
               user={user}
               settings={settings}
               onNavigate={(tab) => setActiveTab(tab)}
-              onOpenWithdraw={() => setIsWithdrawModalOpen(true)}
             />
           )}
 
@@ -184,31 +162,15 @@ export default function App() {
               user={user}
               settings={settings}
               onNavigate={(tab) => setActiveTab(tab)}
-              onOpenWithdraw={() => setIsWithdrawModalOpen(true)}
             />
           )}
         </main>
 
-        {/* Floating Bottom Navigation (hidden when withdrawal modal is open so it NEVER obscures buttons) */}
-        {!isWithdrawModalOpen && (
-          <BottomNav
-            activeTab={activeTab}
-            onTabChange={(tab) => setActiveTab(tab)}
-          />
-        )}
-
-        {/* Global Root Withdrawal Modal - Cleanest viewport presentation */}
-        {isWithdrawModalOpen && (
-          <WithdrawModal
-            user={user}
-            settings={settings}
-            onClose={() => setIsWithdrawModalOpen(false)}
-            onSuccess={() => {
-              setIsWithdrawModalOpen(false);
-              setUser(getCurrentUser());
-            }}
-          />
-        )}
+        {/* Floating Bottom Navigation */}
+        <BottomNav
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab)}
+        />
       </div>
     </div>
   );
