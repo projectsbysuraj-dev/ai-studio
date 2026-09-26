@@ -20,6 +20,7 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  Trash2,
 } from 'lucide-react';
 import {
   AppSettings,
@@ -32,6 +33,8 @@ import {
   syncWithdrawalsFromFirebase,
   approveWithdrawal,
   rejectWithdrawal,
+  deleteWithdrawalPermanently,
+  deleteUserPermanently,
   saveSettings,
   saveTheme,
   THEME_PRESETS,
@@ -64,10 +67,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   theme,
   onNavigateToUserApp,
 }) => {
-  // Authentication state
+  // Authentication state - Empty by default (Manual fill as requested)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(isAdminLoggedIn());
-  const [loginEmail, setLoginEmail] = useState('adminrohit@gmail.com');
-  const [loginPassword, setLoginPassword] = useState('adminrohit10');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -76,6 +79,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [withdrawals, setWithdrawals] = useState(getAllWithdrawals());
   const [users, setUsers] = useState(getAllUsers());
   const [adminCreds, setAdminCreds] = useState(getAdminCredentials());
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<UserProfile | null>(null);
+  const [deleteConfirmWithdrawal, setDeleteConfirmWithdrawal] = useState<string | null>(null);
 
   // Settings form state
   const [botUsername, setBotUsername] = useState(settings.botUsername);
@@ -180,6 +185,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       rejectWithdrawal(id, reason || 'Verification failed');
       setWithdrawals(getAllWithdrawals());
     }
+  };
+
+  const handleDeleteWithdrawal = async (id: string) => {
+    triggerHaptic('medium');
+    await deleteWithdrawalPermanently(id);
+    setDeleteConfirmWithdrawal(null);
+    setWithdrawals(getAllWithdrawals());
+    setUserActionToast(`🗑️ Withdrawal request #${id} permanently deleted from database.`);
+    setTimeout(() => setUserActionToast(null), 3500);
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    triggerHaptic('medium');
+    await deleteUserPermanently(userId);
+    setDeleteConfirmUser(null);
+    setUsers(getAllUsers());
+    setUserActionToast(`🗑️ User #${userId} permanently deleted from database.`);
+    setTimeout(() => setUserActionToast(null), 3500);
   };
 
   const handleSaveSettings = (e: React.FormEvent) => {
@@ -303,16 +326,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                Admin Gmail / Email
+                Admin ID / Gmail
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
-                  type="email"
+                  type="text"
                   required
+                  autoComplete="off"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="adminrohit@gmail.com"
+                  placeholder="Enter Admin ID or Gmail"
                   className="w-full bg-slate-800/80 border border-slate-700 focus:border-sky-500 rounded-xl py-3 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500 font-medium"
                 />
               </div>
@@ -327,9 +351,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="off"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="adminrohit10"
+                  placeholder="Enter Admin Password"
                   className="w-full bg-slate-800/80 border border-slate-700 focus:border-sky-500 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500 font-medium"
                 />
                 <button
@@ -607,24 +632,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       </div>
                     </div>
 
-                    {item.status === 'pending' && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => handleApproveWithdrawal(item.id)}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/30 transition-all active:scale-95"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                          <span>Approve &amp; Pay</span>
-                        </button>
-                        <button
-                          onClick={() => handleRejectWithdrawal(item.id)}
-                          className="bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all border border-rose-500/40"
-                        >
-                          <XCircle className="w-4 h-4" />
-                          <span>Reject</span>
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApproveWithdrawal(item.id)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-700/30 transition-all active:scale-95"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Approve &amp; Pay</span>
+                          </button>
+                          <button
+                            onClick={() => handleRejectWithdrawal(item.id)}
+                            className="bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition-all border border-rose-500/40"
+                          >
+                            <XCircle className="w-4 h-4" />
+                            <span>Reject</span>
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setDeleteConfirmWithdrawal(item.id)}
+                        title="Delete withdrawal record permanently from database"
+                        className="bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800 p-2.5 rounded-xl transition-all active:scale-95 flex items-center gap-1 text-xs"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-400" />
+                        <span className="hidden sm:inline">Delete</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -677,9 +712,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           <span className="text-xs text-slate-400 font-mono">@{u.username} (#{u.id})</span>
                         </div>
                       </div>
-                      <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
-                        ₹{u.balance.toFixed(2)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2.5 py-0.5 rounded-full">
+                          ₹{u.balance.toFixed(2)}
+                        </span>
+                        <button
+                          onClick={() => setDeleteConfirmUser(u)}
+                          title="Permanently delete user from database"
+                          className="bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800 p-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                          <span className="text-[10px] text-rose-400 font-semibold hidden sm:inline">Delete</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
@@ -825,35 +870,43 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </form>
             </div>
 
-            {/* Change Admin Email Card */}
+            {/* Change Admin ID / Email Card */}
             <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
-                <Mail className="w-5 h-5 text-sky-400" />
-                <h3 className="font-['Outfit'] font-bold text-sm text-white">
-                  Admin Email / Gmail
-                </h3>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-sky-400" />
+                  <h3 className="font-['Outfit'] font-bold text-sm text-white">
+                    Admin Login ID / Gmail
+                  </h3>
+                </div>
+                <span className="text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800/60 px-2 py-0.5 rounded-full">
+                  Active: {adminCreds.email}
+                </span>
               </div>
 
               <form onSubmit={handleChangeEmail} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">
-                    Registered Admin Gmail
+                    Set New Admin ID or Gmail
                   </label>
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={newEmailInput}
                     onChange={(e) => setNewEmailInput(e.target.value)}
-                    placeholder="adminrohit@gmail.com"
-                    className="w-full bg-slate-800 border border-slate-700 text-sm p-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                    placeholder="e.g. admin or rohit@gmail.com"
+                    className="w-full bg-slate-800 border border-slate-700 text-sm p-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-medium"
                   />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    You can log in using this ID or Gmail from the admin login page.
+                  </p>
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3 rounded-xl transition-colors border border-slate-700"
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-3 rounded-xl transition-colors border border-slate-700 active:scale-95"
                 >
-                  Save Admin Gmail
+                  Save Admin ID / Gmail 📝
                 </button>
               </form>
             </div>
@@ -1053,6 +1106,72 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <pre className="text-xs font-mono text-slate-400 max-h-96 overflow-y-auto whitespace-pre-wrap select-all">
                 {generateStandaloneHtml().slice(0, 3000)}...
               </pre>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal for User */}
+        {deleteConfirmUser && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-rose-500/50 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-scale-up">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-['Outfit'] font-black text-lg text-white">Permanently Delete User?</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Are you sure you want to permanently delete user <strong className="text-rose-300">{deleteConfirmUser.name}</strong> (#{deleteConfirmUser.id}) from the database? All their data, spins, and balance will be wiped out.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmUser(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 rounded-xl border border-slate-700 active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteUser(deleteConfirmUser.id)}
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-lg shadow-rose-600/30 active:scale-95 transition-all"
+                >
+                  Yes, Delete User
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal for Withdrawal Record */}
+        {deleteConfirmWithdrawal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-rose-500/50 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-scale-up">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-['Outfit'] font-black text-lg text-white">Delete Withdrawal Record?</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Permanently delete withdrawal request <strong className="text-rose-300">#{deleteConfirmWithdrawal}</strong> from the database?
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmWithdrawal(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs py-2.5 rounded-xl border border-slate-700 active:scale-95 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteWithdrawal(deleteConfirmWithdrawal)}
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs py-2.5 rounded-xl shadow-lg shadow-rose-600/30 active:scale-95 transition-all"
+                >
+                  Yes, Delete Record
+                </button>
+              </div>
             </div>
           </div>
         )}

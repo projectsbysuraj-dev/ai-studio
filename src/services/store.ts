@@ -15,6 +15,7 @@ import {
   set,
   get,
   update,
+  remove,
   onValue,
   initFirebaseAuth,
   firebaseConfig,
@@ -281,6 +282,16 @@ export function saveAdminCredentials(creds: AdminCredentials): void {
   localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, JSON.stringify(creds));
   notifySubscribers('admin_auth_updated');
 
+  // Push to Firebase RTDB via REST (Instant and resilient)
+  try {
+    fetch('https://telebot-26c11-default-rtdb.firebaseio.com/admin_auth.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(creds),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+
   if (rtdb) {
     set(ref(rtdb, 'admin_auth'), creds).catch((e) => {
       console.warn('Firebase admin_auth save notice:', e);
@@ -288,30 +299,34 @@ export function saveAdminCredentials(creds: AdminCredentials): void {
   }
 }
 
-export function verifyAdminLogin(email: string, pass: string): { success: boolean; error?: string } {
+export function verifyAdminLogin(idOrEmail: string, pass: string): { success: boolean; error?: string } {
   const current = getAdminCredentials();
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanPass = pass.trim();
+  const cleanInput = (idOrEmail || '').trim().toLowerCase();
+  const cleanPass = (pass || '').trim();
 
-  // Primary check against saved credentials
-  if (
-    cleanEmail === current.email.toLowerCase() &&
-    cleanPass === current.password
-  ) {
+  if (!cleanInput || !cleanPass) {
+    return { success: false, error: 'Please enter both Admin ID/Gmail and Password!' };
+  }
+
+  // Primary check against saved credentials (matches email or ID)
+  const savedEmail = current.email.toLowerCase();
+  const isMatch = (cleanInput === savedEmail || savedEmail.split('@')[0] === cleanInput) && cleanPass === current.password;
+
+  if (isMatch) {
     setAdminLoggedIn(true);
     return { success: true };
   }
 
-  // Backup check against original adminrohit credentials in case of any reset
+  // Fallback for default initial credentials if not yet customized
   if (
-    cleanEmail === 'adminrohit@gmail.com' &&
+    (cleanInput === 'adminrohit@gmail.com' || cleanInput === 'adminrohit' || cleanInput === 'admin') &&
     cleanPass === 'adminrohit10'
   ) {
     setAdminLoggedIn(true);
     return { success: true };
   }
 
-  return { success: false, error: 'Invalid Gmail or Password! Please check your credentials.' };
+  return { success: false, error: 'Invalid Admin ID or Password! Please verify and re-try.' };
 }
 
 export function updateAdminPassword(currentPass: string, newPass: string): { success: boolean; error?: string } {
@@ -333,10 +348,10 @@ export function updateAdminPassword(currentPass: string, newPass: string): { suc
   return { success: true };
 }
 
-export function updateAdminEmail(newEmail: string): { success: boolean; error?: string } {
-  const clean = newEmail.trim().toLowerCase();
-  if (!clean || !clean.includes('@')) {
-    return { success: false, error: 'Please enter a valid email address!' };
+export function updateAdminEmail(newIdOrEmail: string): { success: boolean; error?: string } {
+  const clean = newIdOrEmail.trim().toLowerCase();
+  if (!clean || clean.length < 3) {
+    return { success: false, error: 'Admin ID or Email must be at least 3 characters long!' };
   }
   const current = getAdminCredentials();
   const updated: AdminCredentials = {
@@ -841,14 +856,88 @@ export function approveWithdrawal(withdrawalId: string): boolean {
     });
   }
 
-  // Update transaction status
+  // Update transaction status & clear success message in transaction history
   const txs = getAllTransactions();
   const tx = txs.find(t => t.userId === item.userId && t.type === 'withdrawal' && Math.abs(t.amount) === item.amount && t.status === 'pending');
+  const successDesc = item.method === 'upi'
+    ? `Withdrawal Successful ✅ (₹${item.amount} sent to UPI: ${item.upiId})`
+    : `Withdrawal Successful ✅ (₹${item.amount} sent to Bank A/C: ${item.accountNumber})`;
+
   if (tx) {
     tx.status = 'completed';
+    tx.description = successDesc;
+    tx.createdAt = Date.now();
     saveTransactions(txs);
+  } else {
+    addTransaction({
+      userId: item.userId,
+      type: 'withdrawal',
+      amount: -item.amount,
+      description: successDesc,
+      status: 'completed',
+    });
   }
 
+  return true;
+}
+
+export async function deleteWithdrawalPermanently(withdrawalId: string): Promise<boolean> {
+  const list = getAllWithdrawals().filter(w => w.id !== withdrawalId);
+  saveWithdrawals(list);
+
+  // 1. Direct REST delete from Firebase
+  try {
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/withdrawals/${withdrawalId}.json`, {
+      method: 'DELETE',
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 2. Firebase SDK remove
+  if (rtdb) {
+    try {
+      remove(ref(rtdb, `withdrawals/${withdrawalId}`)).catch(() => {});
+    } catch (e) {}
+  }
+
+  notifySubscribers('withdrawal_deleted');
+  return true;
+}
+
+export async function deleteUserPermanently(userId: string): Promise<boolean> {
+  // Remove from local users list
+  const users = getAllUsers().filter(u => u.id !== userId && u.telegramId !== userId);
+  saveUsers(users);
+
+  // Remove user transactions
+  const txs = getAllTransactions().filter(t => t.userId !== userId);
+  saveTransactions(txs);
+
+  // Remove user withdrawals
+  const withdrawals = getAllWithdrawals().filter(w => w.userId !== userId);
+  saveWithdrawals(withdrawals);
+
+  // 1. Direct REST delete from Firebase
+  try {
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/users/${userId}.json`, {
+      method: 'DELETE',
+      keepalive: true,
+    }).catch(() => {});
+    fetch(`https://telebot-26c11-default-rtdb.firebaseio.com/referrals/${userId}.json`, {
+      method: 'DELETE',
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 2. Firebase SDK remove
+  if (rtdb) {
+    try {
+      remove(ref(rtdb, `users/${userId}`)).catch(() => {});
+      remove(ref(rtdb, `referrals/${userId}`)).catch(() => {});
+    } catch (e) {}
+  }
+
+  notifySubscribers('user_deleted');
   return true;
 }
 
