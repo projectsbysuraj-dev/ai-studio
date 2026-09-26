@@ -8,11 +8,8 @@ import {
   decrementUserSpin,
   addBalanceToUser,
   addTransaction,
-  getReferralLeaderboard,
-  getUserLeaderboardRank,
 } from '../services/store';
 import { triggerHaptic } from '../services/telegram';
-import { LeaderboardView } from './LeaderboardView';
 
 interface HomeScreenProps {
   user: UserProfile;
@@ -35,9 +32,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ user, settings, onNaviga
   const [wonModal, setWonModal] = useState<{ amount: number } | null>(null);
   const [noSpinsModal, setNoSpinsModal] = useState(false);
   const wheelRef = useRef<HTMLDivElement>(null);
-
-  const leaderboardEntries = getReferralLeaderboard(user.id, 10);
-  const userRankInfo = getUserLeaderboardRank(user.id);
 
   const handleSpinClick = () => {
     if (isSpinning) return;
@@ -285,36 +279,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ user, settings, onNaviga
             <span>1 Friend Invite via Bot = 1 Free Lucky Spin Chance</span>
           </p>
         </div>
-      </div>
-
-      {/* Referral Leaderboard Section (Top 10) */}
-      <div className="w-full bg-white rounded-[26px] p-5 shadow-xl shadow-sky-950/10 border border-white">
-        <div className="flex items-center justify-between mb-3.5 border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="font-['Outfit'] font-black text-slate-900 text-sm flex items-center gap-1.5">
-              <span>🏆</span>
-              <span>Referral Leaderboard</span>
-            </h3>
-            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-              Top 10 users with the most referral points
-            </p>
-          </div>
-          <button
-            onClick={() => onNavigate('profile')}
-            className="text-[11px] font-bold text-[#0284c7] hover:underline flex items-center gap-0.5 bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200 transition-colors"
-          >
-            <span>In Profile</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <LeaderboardView
-          entries={leaderboardEntries}
-          currentUserRank={userRankInfo}
-          onInviteClick={() => onNavigate('invite')}
-          onViewProfile={() => onNavigate('profile')}
-          showFullDetails={false}
-        />
       </div>
 
       {/* How to Earn & Withdraw Section Card (Matching Screenshot_20260925-223333.png) */}
